@@ -10,6 +10,7 @@ import torch
 import torch.utils.data as Data
 from torch import nn, optim
 import matplotlib.pyplot as plt
+import torch.distributions as D
 from torch.autograd import Variable
 import itertools 
 
@@ -17,7 +18,7 @@ import itertools
 start = time.time()
 
 ocsvm_model_path = './model/ocsvm_best_NSLKDD.pkl'
-DCVAE_model_path = './minmax_f3_CVAE1_setting4.pkl'
+DCVAE_model_path = './model/VEAC_setting4.pkl'
 # setting1 = ['normal', 'back', 'ipsweep', 'neptune', 'nmap', 'portsweep', 'satan', 'smurf', 'teardrop']
 # setting2
 # setting1 = ['normal','ipsweep', 'neptune', 'nmap', 'portsweep','smurf', 'teardrop','guess_passwd','warezclient']
@@ -28,7 +29,7 @@ setting1 = ['normal','ipsweep','portsweep','teardrop','nmap','pod','smurf','ware
 value_dicts_path = './Data/value_dict.pkl'
 train_data_path = './Data/NSLKDD_train_setting4.npy'
 test_data_path = './Data/NSLKDD_test_new.npy'
-result_save_path = './pic/ours_setting4.png'
+result_save_path = './Further_exp/exp_result/ours_a_setting4.jpg'
 BATCH_SIZE = 50
 
 # =======================================
@@ -74,38 +75,12 @@ print('data preprocess done')
 # 模型导入，类代码
 print('load model ======')
 ocsvm_model = joblib.load(ocsvm_model_path)
-class CVAE1(nn.Module):
+class VEAC(nn.Module):
     def __init__(self,num_classes):
-        super(CVAE1, self).__init__()
-        self.l_z_xy=nn.Sequential(nn.Linear(41+num_classes, 35), nn.Softplus(),nn.Linear(35, 20), nn.Softplus(), nn.Linear(20, 2*3))
+        super(VEAC, self).__init__()
         self.l_z_x=nn.Sequential(nn.Linear(41,36),nn.Softplus(),nn.Softplus(), nn.Linear(36,20),nn.Softplus(),nn.Linear(20, 2*3))
         self.l_y_xz=nn.Sequential(nn.Linear(41+3,35),nn.Softplus(), nn.Linear(35,20),nn.Softplus(),nn.Linear(20, num_classes),nn.Sigmoid())     
         self.lb = LabelBinarizer()
-    """   
-    def reparameterize(self, mu, logvar):
-        if self.training:
-            std = torch.exp(0.5*logvar)
-            eps = torch.randn_like(std)
-            return eps.mul(std).add_(mu)
-        else:
-            return mu   
-                        
-    def to_categrical(self, y: torch.FloatTensor):
-        y_n = y.numpy()
-        self.lb.fit(list(range(0,9)))
-        y_one_hot = self.lb.transform(y_n)
-        floatTensor = torch.FloatTensor(y_one_hot).cuda()
-        return floatTensor
-    """   
-    def z_xy(self,x,y):
-        #y_c = self.to_categrical(y)
-        xy =  torch.cat((x, y), 1)
-        h=self.l_z_xy(xy)
-        mu, logsigma = h.chunk(2, dim=-1)
-        return D.Normal(mu, logsigma.exp())
-        #return mu, logsigma
-        
-        
     def z_x(self,x):
         mu, logsigma = self.l_z_x(x).chunk(2, dim=-1)
         return D.Normal(mu, logsigma.exp())
@@ -121,9 +96,9 @@ class CVAE1(nn.Module):
         return self.l_y_xz(torch.cat((x, mu), 1))
 
 def test1(test_loader,device,cuda):
-    CVAE = torch.load(DCVAE_model_path)
-    CVAE = CVAE.to(device)
-    CVAE.eval()  
+    VEAC = torch.load('./model/VEAC_setting4.pkl')
+    VEAC = VEAC.to(device)
+    VEAC.eval()  
     total=0
     correct=0
     i=0
@@ -132,9 +107,7 @@ def test1(test_loader,device,cuda):
         if cuda:
             xtest = xtest.cuda()
         ytest = ytest.long()
-        #ytest=torch.unsqueeze(ytest, 1)
-        #ytest=torch.zeros(ytest.size()[0], 9).scatter_(1, ytest, 1).cuda()
-        out = CVAE(xtest)
+        out = VEAC(xtest)
         _, predicted = torch.max(out.data, 1)
         total += xtest.size(0)
         correct += (predicted.cpu() == ytest).sum()

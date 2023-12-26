@@ -27,42 +27,36 @@ import copy
 from sklearn.metrics import precision_score
 from sklearn.metrics import recall_score, f1_score
 from sklearn.metrics import precision_recall_fscore_support
+import pickle
 import time 
-class CVAE1(nn.Module):
+
+class VEAC(nn.Module):
     def __init__(self,num_classes):
-        super(CVAE1, self).__init__()
-        self.l_z_xy=nn.Sequential(nn.Linear(41+num_classes, 35), nn.Softplus(),nn.Linear(35, 20), nn.Softplus(), nn.Linear(20, 2*3))
+        super(VEAC, self).__init__()
         self.l_z_x=nn.Sequential(nn.Linear(41,36),nn.Softplus(),nn.Softplus(), nn.Linear(36,20),nn.Softplus(),nn.Linear(20, 2*3))
         self.l_y_xz=nn.Sequential(nn.Linear(41+3,35),nn.Softplus(), nn.Linear(35,20),nn.Softplus(),nn.Linear(20, num_classes),nn.Sigmoid())     
         self.lb = LabelBinarizer()
-    def z_xy(self,x,y):
-        #y_c = self.to_categrical(y)
-        xy =  torch.cat((x, y), 1)
-        h=self.l_z_xy(xy)
-        mu, logsigma = h.chunk(2, dim=-1)
-        return D.Normal(mu, logsigma.exp())
-        #return mu, logsigma       
     def z_x(self,x):
         mu, logsigma = self.l_z_x(x).chunk(2, dim=-1)
         return D.Normal(mu, logsigma.exp())
-        #return mu,logsigma      
+        #return mu,logsigma
+        
     def y_xz(self,x,z):
         xz=torch.cat((x, z), 1)
         #return D.Bernoulli(self.y_xz(xz))
-        return self.l_y_xz(xz)   
+        return self.l_y_xz(xz)
+    
     def forward(self, x):
         mu, logsigma = self.l_z_x(x).chunk(2, dim=-1)
         return self.l_y_xz(torch.cat((x, mu), 1))
-  
-  
-def loss_func(z_xy, z_x,y_xz,y):
-    KLD = D.kl.kl_divergence(z_xy,z_x) 
-    #KLD=torch.sum(KLD)
+
+
+def loss_func(y_xz,y):
     loss=nn.BCELoss(reduction='sum').cuda()
     BCE = loss(y_xz, y)   
-    return (torch.sum(KLD)+BCE)/y.size(0)
+    return BCE/y.size(0)
 
-def Stage1Train(train_loader,device,cuda,num_epoch):
+def VEACTrain(train_loader,device,cuda,num_epoch):
         #Sets the module in training mode.
     
     max_label = -1  # 初始化最大Label编号为-1
@@ -74,12 +68,14 @@ def Stage1Train(train_loader,device,cuda,num_epoch):
         max_label = max(max_label, torch.max(label).item())  # 更新最大Label编号
     
     num_classes = max_label + 1  # 确定One-Hot编码的类别数目
-    model = CVAE1(num_classes).to(device)
+    model = VEAC(num_classes).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
         
     model.train()
     train_loss = 0
+    time_list = []
     for epoch in range(num_epoch):
+        epoch_start = time.time()
         epoch_loss = 0.0  # 用于累计每个epoch的总损失
 
         for batch_idx, (data, label) in enumerate(train_loader):
@@ -93,12 +89,11 @@ def Stage1Train(train_loader,device,cuda,num_epoch):
                 data = data.cuda()
             
             optimizer.zero_grad()
-            z_xy = model.z_xy(data, label)
             z_x = model.z_x(data)
-            z = z_xy.rsample()
+            z = z_x.rsample()
             y_xz = model.y_xz(data, z)
 
-            loss = loss_func(z_xy, z_x, y_xz, label)
+            loss = loss_func(y_xz, label)
             loss.backward()
             train_loss += loss.item()
             epoch_loss += loss.item()  # 累计每个batch的损失
@@ -109,13 +104,10 @@ def Stage1Train(train_loader,device,cuda,num_epoch):
 
         print('Epoch [%d/%d] Average Loss: %.4f' % (epoch + 1, num_epoch, average_loss))
 
-    torch.save(model, 'minmax_f3_CVAE1_setting4.pkl')  
 
 
-
-
-  
-def main(argv):
+if __name__ == '__main__':
+    start = time.time()
 
     no_cuda = False
     cuda_available = not no_cuda and torch.cuda.is_available()
@@ -135,7 +127,7 @@ def main(argv):
     # 定义需要筛选的Label编号
 
     # setting1
-    # setting1 = ['normal', 'back', 'ipsweep', 'neptune', 'nmap', 'portsweep', 'satan', 'smurf', 'teardrop']
+    setting1 = ['normal', 'back', 'ipsweep', 'neptune', 'nmap', 'portsweep', 'satan', 'smurf', 'teardrop']
 
     # 实际为setting2，变量名懒得改了
     # setting1 = ['normal','ipsweep', 'neptune', 'nmap', 'portsweep','smurf', 'teardrop','guess_passwd','warezclient']
@@ -144,14 +136,12 @@ def main(argv):
     # setting1 =  ['normal','nmap', 'neptune','satan','pod','back','ipsweep','teardrop']
 
     # setting4
-    setting1 = ['normal','ipsweep','portsweep','teardrop','nmap','pod','smurf','warezclient']
+    # setting1 = ['normal','ipsweep','portsweep','teardrop','nmap','pod','smurf','warezclient']
     
 
-    datatrain = np.load('./Data/NSLKDD_train_setting4.npy')
+    datatrain = np.load('./Data/NSLKDD_train_setting1.npy')
     xtrain = datatrain[:,:-2]  
     ytrain = datatrain[:,-2]
-
-
 
     testdatatest = np.load('./Data/NSLKDD_test_new.npy')
     print(testdatatest.shape)
@@ -174,8 +164,10 @@ def main(argv):
     # 转换为ndarray对象
     testdatatest = np.array(selected_samples)
     print(testdatatest.shape)
+
     xtest = testdatatest[:,:-2]
     ytest1 = testdatatest[:,-2]
+
     xtest = preprocessing.MinMaxScaler().fit(xtrain).transform(xtest)
     #xunknown = preprocessing.MinMaxScaler().fit(xtrain).transform(xunknown)
     minmaxscaler=preprocessing.MinMaxScaler().fit(xtrain)
@@ -184,18 +176,15 @@ def main(argv):
     
     xtrain = preprocessing.MinMaxScaler().fit_transform(xtrain)
     xtrain=torch.from_numpy(xtrain)
-    ytrain = torch.from_numpy(ytrain)    
+    ytrain = torch.from_numpy(ytrain)
+    
     train_dataset = Data.TensorDataset(xtrain, ytrain)
     train_loader = Data.DataLoader(dataset=train_dataset, batch_size=BATCH_SIZE,
-                            shuffle=True, num_workers=2)                       
-    Stage1Train(train_loader,device,cuda_available,num_epoch=150)  
-    print("training done")
+                            shuffle=True, num_workers=2)
+    
+    VEACTrain(train_loader,device,cuda_available,num_epoch=150)  
+    print('Training done.')
 
-
-  
-
-if __name__ == "__main__":
-    start = time.time()
-    main(sys.argv)                
     end = time.time()
-    print('elapsed time:',end - start)
+
+    print('elapased time:',end-start)
